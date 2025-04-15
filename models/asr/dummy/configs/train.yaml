@@ -1,0 +1,37 @@
+# pytorch_lightning==2.5.1
+seed_everything: true
+model:
+  class_path: models.asr.dummy.models.dnn.Dnn
+  init_args:
+    input_dim: 40
+    hidden_dim: 100
+    output_dim: 40
+data:
+  class_path: data.lhotse_recipes_datamodule.LhotseRecipesDataModule
+  init_args:
+    recipe_config: models/asr/dummy/configs/mini_librispeech.yaml
+    train_params:
+      manifest_part: train-clean-5
+      dataset:
+        class_path: data.dataset.K2SpeechRecognitionDatasetWraper
+        init_args: 
+          input_strategy:
+            class_path: lhotse.dataset.input_strategies.OnTheFlyFeatures
+            init_args:
+              extractor:
+                class_path: lhotse.features.kaldi.extractors.Fbank
+                init_args:
+                  config:
+                    num_mel_bins: 40
+      sampler:
+        class_path: lhotse.dataset.sampling.SimpleCutSampler
+        init_args:
+          max_duration: 200
+          shuffle: True
+
+
+
+trainer:
+  max_epochs: 10
+  logger: true
+

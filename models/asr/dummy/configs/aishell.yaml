@@ -1,0 +1,8 @@
+download:
+  class_path: lhotse.recipes.aishell.download_aishell
+  init_args:
+    target_dir: export/data/aishell
+prepare:
+  class_path: lhotse.recipes.aishell.prepare_aishell
+  init_args:
+    corpus_dir: export/data/aishell

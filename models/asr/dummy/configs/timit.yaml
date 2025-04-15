@@ -1,0 +1,8 @@
+download:
+  class_path: lhotse.recipes.timit.download_timit
+  init_args:
+    target_dir: export/data/timit
+prepare:
+  class_path: lhotse.recipes.timit.prepare_timit
+  init_args:
+    corpus_dir: export/data/timit
