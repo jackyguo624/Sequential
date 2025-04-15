@@ -5,7 +5,7 @@ kaldiio>=2.18.0
 lhotse>=1.31.0
 lightning
 jsonargparse[signatures]
-numpy>=1.26.1
+numpy==1.25.2
 peft>=0.13.2
 sentencepiece>=0.2.0
 torch>=2.0.0,<=2.1.0
