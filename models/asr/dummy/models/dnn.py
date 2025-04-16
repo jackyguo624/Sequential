@@ -1,7 +1,7 @@
 import pytorch_lightning as pl
 import torch.nn as nn
 import torch
-
+import torch_npu
 class Dnn(pl.LightningModule):
     def __init__(self, input_dim, hidden_dim, output_dim):
         super().__init__()
@@ -16,6 +16,7 @@ class Dnn(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         inputs = batch['inputs']
+        print(inputs.device)
         outputs = self.forward(inputs)
         loss = nn.functional.mse_loss(outputs, inputs)
         self.log('train_loss', loss)

@@ -32,6 +32,10 @@ data:
 
 
 trainer:
-  max_epochs: 10
+  max_epochs: 2
   logger: true
+  accelerator: auto
+  devices: auto
+  strategy: ddp
+  use_distributed_sampler: false
 

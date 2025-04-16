@@ -2,10 +2,12 @@ import pytorch_lightning as pl
 from typing import Optional, Dict, Callable
 from lhotse import CutSet
 from lhotse.dataset.sampling.base import CutSampler
+from lhotse.dataset.dataloading import make_worker_init_fn
 from torch.utils.data import DataLoader, Dataset
 from pathlib import Path
 from jsonargparse import ArgumentParser, set_parsing_settings
 from typing import Tuple, Union
+import os
 
 class LhotseRecipesDataModule(pl.LightningDataModule):
     def __init__(self,
@@ -53,6 +55,23 @@ class LhotseRecipesDataModule(pl.LightningDataModule):
 
         sampler = init.sampler(cuts)
         dataset = init.dataset()
-        dataloader = DataLoader(dataset, batch_sampler=sampler, num_workers=20, collate_fn=lambda x: x)
+        num_node = 1
+
+        # for multi-node training
+        if os.environ.get("NODE_RANK", None) is not None:
+            rank = int(os.environ.get("NODE_RANK", None)) * num_node + \
+                int(os.environ.get("LOCAL_RANK", None))
+            world_size = int(os.environ.get("WORLD_SIZE", None))
+            worker_init_fn = make_worker_init_fn(rank=rank, world_size=world_size)
+        else:
+            worker_init_fn = None
+
+
+        dataloader = DataLoader(dataset, 
+                                batch_sampler=sampler, 
+                                num_workers=10,
+                                persistent_workers=True,
+                                worker_init_fn=worker_init_fn,
+                                collate_fn=lambda x: x)
 
         return dataloader
