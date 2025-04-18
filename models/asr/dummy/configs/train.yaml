@@ -34,8 +34,8 @@ data:
 trainer:
   max_epochs: 2
   logger: true
-  accelerator: auto
+  accelerator: cuda
   devices: auto
-  strategy: ddp
+  strategy: fsdp
   use_distributed_sampler: false
 

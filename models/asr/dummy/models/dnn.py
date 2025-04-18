@@ -1,10 +1,11 @@
 import pytorch_lightning as pl
 import torch.nn as nn
 import torch
-import torch_npu
+
 class Dnn(pl.LightningModule):
     def __init__(self, input_dim, hidden_dim, output_dim):
         super().__init__()
+        self.save_hyperparameters()
         self.fc1 = nn.Linear(input_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, output_dim)
 
