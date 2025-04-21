@@ -8,6 +8,7 @@ class Dnn(pl.LightningModule):
         self.save_hyperparameters()
         self.fc1 = nn.Linear(input_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, output_dim)
+        self.automatic_optimization = False
 
     def forward(self, x):
         x = self.fc1(x)
@@ -22,6 +23,13 @@ class Dnn(pl.LightningModule):
         inputs = inputs.to(outputs.dtype)
         print(f"outputs.dtype: {outputs.dtype}, inputs.dtype: {inputs.dtype}")
         loss = nn.functional.mse_loss(outputs, inputs)
+        
+        opt = self.optimizers()
+        opt.zero_grad()
+        
+        self.manual_backward(loss)
+        opt.step()
+        
         self.log('train_loss', loss)
         return loss
 
