@@ -4,3 +4,8 @@ uv.lock
 __pycache__/
 lightning_logs/
 **/pretrained_model/
+.bak
+.vscode
+log/
+logs/
+third/
