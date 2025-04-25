@@ -1,76 +1,56 @@
 import logging
-import os
-import random
-import re
 
 import torch
-import torch.nn as nn
-from transformers import AutoModelForCausalLM
-
 import pytorch_lightning as pl
 
-from models.asr.fireredasr.models.fireredasr_aed import FireRedAsrAed
+from typing import Callable, Any
 from models.asr.fireredasr.models.module.adapter import Adapter
+from models.asr.fireredasr.models.module.conformer_encoder import ConformerEncoder
 from models.asr.fireredasr.tokenizer.llm_tokenizer import DEFAULT_SPEECH_TOKEN, IGNORE_TOKEN_ID
-from models.asr.fireredasr.tokenizer.llm_tokenizer import LlmTokenizerWrapper
-from models.asr.fireredasr.utils.param import count_model_parameters
-
+from models.asr.fireredasr.data.asr_feat import ASRFeatExtractor
 
 class FireRedAsrLlm(pl.LightningModule):
-    @classmethod
-    def load_encoder(cls, model_path):
-        assert os.path.exists(model_path)
-        package = torch.load(model_path, map_location=lambda storage, loc: storage)
-        model = FireRedAsrAed.from_args(package["args"])
-        if "model_state_dict" in package:
-            model.load_state_dict(package["model_state_dict"], strict=False)
-        encoder = model.encoder
-        encoder_dim = encoder.odim
-        return encoder, encoder_dim
-
-    @classmethod
-    def from_args(cls, args):
-        logging.info(args)
-        logging.info("Build FireRedAsrLlm")
-        # Build Speech Encoder
-        encoder, encoder_dim = cls.load_encoder(args.encoder_path)
-        count_model_parameters(encoder)
-        if args.freeze_encoder:
-            logging.info(f"Frezee encoder")
-            for name, param in encoder.named_parameters():
-                param.requires_grad = False
-            encoder.eval()
-
-        if args.use_flash_attn:
-            attn_implementation = "flash_attention_2"
-            if args.use_fp16:
-                torch_dtype = torch.float16
-            else:
-                torch_dtype = torch.float32
-        else:
-            attn_implementation = "eager"
-            if args.use_fp16:
-                torch_dtype = torch.float16
-            else:
-                torch_dtype = torch.float32
-
-        # Build LLM
-        llm = AutoModelForCausalLM.from_pretrained(
-            args.llm_dir,
-            attn_implementation=attn_implementation,
-            torch_dtype=torch_dtype,
-        )
-        count_model_parameters(llm)
+    """
+    FireRed ASR with LLM
+    Args:
+        encoder: ConformerEncoder
+        llm: Any
+        encoder_projector: Adapter
+        tokenizer: AutoTokenizer
+        feat_extractor: ASRFeatExtractor
+        freeze_encoder: bool
+        freeze_llm: bool
+        use_lora: bool
+    """
+    def __init__(self,
+                 encoder: ConformerEncoder,
+                 llm: Callable,
+                 encoder_projector: Adapter, #  Callable[[int], Adapter],
+                 tokenizer: Callable,
+                 feat_extractor: ASRFeatExtractor,
+                 freeze_encoder: bool,
+                 freeze_llm: bool,
+                 use_lora: bool,
+                 ):
+        super().__init__()
+        self.encoder = encoder
+        self.llm = llm
+        self.encoder_projector = encoder_projector # (llm.config.hidden_size)
+        self.tokenizer = tokenizer
+        self.feat_extractor = feat_extractor
+        # args
+        self.freeze_encoder = freeze_encoder
+        self.freeze_llm = freeze_llm
+        self.use_lora = use_lora
 
         # LLM Freeze or LoRA
-        llm_dim = llm.config.hidden_size
-        if args.freeze_llm:
+        if self.freeze_llm:
             logging.info(f"Frezee LLM")
-            for name, param in llm.named_parameters():
+            for name, param in self.llm.named_parameters():
                 param.requires_grad = False
-            llm.eval()
+            self.llm.eval()
         else:
-            if args.use_lora:
+            if self.use_lora:
                 from peft import LoraConfig, get_peft_model
                 lora_config = LoraConfig(
                     r=64,
@@ -87,40 +67,46 @@ class FireRedAsrLlm(pl.LightningModule):
                     lora_dropout=0.05,
                     task_type="CAUSAL_LM",
                 )
-                llm = get_peft_model(llm, lora_config)
-                llm.print_trainable_parameters()
+                self.llm = get_peft_model(self.llm, lora_config)
+                self.llm.print_trainable_parameters()
 
-        tokenizer = LlmTokenizerWrapper.build_llm_tokenizer(args.llm_dir)
-        assert tokenizer.pad_token_id == tokenizer.convert_tokens_to_ids("<|endoftext|>")
-        llm.config.pad_token_id = tokenizer.pad_token_id
-        llm.config.bos_token_id = tokenizer.convert_tokens_to_ids("<|im_start|>")
-        llm.config.eos_token_id = tokenizer.convert_tokens_to_ids("<|im_end|>")
-        llm.config.default_speech_token_id = tokenizer.convert_tokens_to_ids(
+        # Tokenizer
+        assert self.tokenizer.pad_token_id == self.tokenizer.convert_tokens_to_ids("<|endoftext|>")
+        self.llm.config.pad_token_id = self.tokenizer.pad_token_id
+        self.llm.config.bos_token_id = self.tokenizer.convert_tokens_to_ids("<|im_start|>")
+        self.llm.config.eos_token_id = self.tokenizer.convert_tokens_to_ids("<|im_end|>")
+        self.llm.config.default_speech_token_id = self.tokenizer.convert_tokens_to_ids(
             DEFAULT_SPEECH_TOKEN
         )
+        self.save_hyperparameters()
 
-        # Build projector
-        encoder_projector = Adapter(
-            encoder_dim, llm_dim, args.encoder_downsample_rate)
-        count_model_parameters(encoder_projector)
+    def forward(self,
+                padded_feat: torch.Tensor,
+                feat_lengths: torch.Tensor,
+                padded_input_ids: torch.Tensor,
+                attention_mask: torch.Tensor):
+        return self.transcribe(padded_feat, feat_lengths, padded_input_ids, attention_mask)
 
-        return cls(encoder, llm, encoder_projector,
-                   args.freeze_encoder, args.freeze_llm)
+    def training_step(self, batch, batch_idx):
+        print(batch['inputs'].size(), batch['inputs'].device)
+        self.log("train_loss", 1.0)
+        return 1.0
+    
+    def configure_optimizers(self):
+        optimizer = torch.optim.AdamW(self.parameters(), lr=1e-4)
+        return optimizer
 
-    def __init__(self, encoder, llm, encoder_projector,
-                 freeze_encoder, freeze_llm):
-        super().__init__()
-        self.encoder = encoder
-        self.llm = llm
-        self.encoder_projector = encoder_projector
-        # args
-        self.freeze_encoder = freeze_encoder
-        self.freeze_llm = freeze_llm
-        self.llm_config = llm.config
-
-    def transcribe(self, padded_feat, feat_lengths, padded_input_ids, attention_mask,
-                   beam_size=1, decode_max_len=0, decode_min_len=0,
-                   repetition_penalty=1.0, llm_length_penalty=1.0, temperature=1.0):
+    def transcribe(self,
+                  padded_feat: torch.Tensor,
+                  feat_lengths: torch.Tensor,
+                  padded_input_ids: torch.Tensor,
+                  attention_mask: torch.Tensor,
+                  beam_size: int = 1,
+                  decode_max_len: int = 0,
+                  decode_min_len: int = 0,
+                  repetition_penalty: float = 1.0,
+                  llm_length_penalty: float = 1.0,
+                  temperature: float = 1.0):
         encoder_outs, enc_lengths, enc_mask = self.encoder(padded_feat, feat_lengths)
         speech_features, speech_lens = self.encoder_projector(encoder_outs, enc_lengths)
         inputs_embeds = self.llm.get_input_embeddings()(padded_input_ids)
@@ -153,8 +139,13 @@ class FireRedAsrLlm(pl.LightningModule):
 
 
     def _merge_input_ids_with_speech_features(
-        self, speech_features, inputs_embeds, input_ids, attention_mask, labels=None,
-        speech_lens=None
+        self,
+        speech_features: torch.Tensor,
+        inputs_embeds: torch.Tensor,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        labels: torch.Tensor = None,
+        speech_lens: torch.Tensor = None
     ):
         """
         Modified from: https://github.com/k2-fsa/icefall/blob/master/egs/speech_llm/ASR_LLM/whisper_llm_zh/model.py
@@ -272,46 +263,3 @@ class FireRedAsrLlm(pl.LightningModule):
             final_labels = None
 
         return final_embedding, final_attention_mask, final_labels #, position_ids
-
-    def training_step(self, batch, batch_idx):
-        padded_feat, feat_lengths, padded_input_ids, attention_mask, labels = batch
-        encoder_outs, enc_lengths, enc_mask = self.encoder(padded_feat, feat_lengths)
-        speech_features, speech_lens = self.encoder_projector(encoder_outs, enc_lengths)
-        inputs_embeds = self.llm.get_input_embeddings()(padded_input_ids)
-        # train
-        inputs_embeds, attention_mask, labels = \
-            self._merge_input_ids_with_speech_features(
-                speech_features.to(inputs_embeds.dtype), inputs_embeds, padded_input_ids, attention_mask, target_ids,
-                speech_lens=speech_lens
-            )
-        model_outputs = self.llm(inputs_embeds=inputs_embeds, attention_mask=attention_mask, labels=labels)
-        acc = -1
-        with torch.no_grad():
-            preds = torch.argmax(model_outputs.logits, -1)
-            acc = compute_accuracy(preds.detach()[:, :-1], labels.detach()[:, 1:], ignore_label=-100)
-        loss = model_outputs.loss
-
-        self.log("train_loss", loss)
-        self.log("train_acc", acc)
-        return loss
-
-def compute_accuracy(pad_outputs, pad_targets, ignore_label):
-    """Calculate accuracy.
-
-    Args:
-        pad_outputs (LongTensor): Prediction tensors (B, Lmax).
-        pad_targets (LongTensor): Target label tensors (B, Lmax).
-        ignore_label (int): Ignore label id.
-
-    Returns:
-        float: Accuracy value (0.0 - 1.0).
-
-    """
-    mask = pad_targets != ignore_label
-    numerator = torch.sum(
-        pad_outputs.masked_select(mask) == pad_targets.masked_select(mask)
-    )
-    denominator = torch.sum(mask)
-    return numerator.float() / denominator.float() #(FIX:MZY):return torch.Tensor type
-
-

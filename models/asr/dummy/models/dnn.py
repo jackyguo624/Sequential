@@ -10,6 +10,8 @@ class Dnn(pl.LightningModule):
         self.fc2 = nn.Linear(hidden_dim, output_dim)
 
     def forward(self, x):
+        print(f"x.dtype: {x.dtype}, x.size: {x.size()}")
+        print(f"self.fc1.weight.dtype: {self.fc1.weight.dtype}, self.fc1.weight.size: {self.fc1.weight.size()}")
         x = self.fc1(x)
         x = torch.relu(x)
         x = self.fc2(x)

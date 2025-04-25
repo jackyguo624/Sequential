@@ -5,7 +5,7 @@ import glob
 import os
 import sys
 
-from models.fireredasr.models.fireredasr import FireRedAsr
+from models.asr.fireredasr.models.fireredasr import FireRedAsr
 
 
 parser = argparse.ArgumentParser()

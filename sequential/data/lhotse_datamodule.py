@@ -8,7 +8,10 @@ from torch.utils.data import DataLoader, Dataset
 from pathlib import Path
 from typing import Tuple, Union
 import os
+from lhotse.audio.backend import AudioBackend, set_current_audio_backend
 
+import logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class LhotseDataModule(pl.LightningDataModule):
     def __init__(self,
@@ -18,6 +21,7 @@ class LhotseDataModule(pl.LightningDataModule):
                  val_sampler: Callable[[Union[CutSet, Tuple[CutSet]]], CutSampler] = None,
                  test_dataset: Callable[[], Dataset] = None,
                  test_sampler: Callable[[Union[CutSet, Tuple[CutSet]]], CutSampler] = None,
+                 audio_backend: AudioBackend = None,
                  ):
         super().__init__()
         self.train_dataset = train_dataset
@@ -26,7 +30,11 @@ class LhotseDataModule(pl.LightningDataModule):
         self.val_sampler = val_sampler
         self.test_dataset = test_dataset
         self.test_sampler = test_sampler
-    
+        self.audio_backend = audio_backend
+        if self.audio_backend:
+            logging.info(f"Setting audio backend to {self.audio_backend}")
+            set_current_audio_backend(self.audio_backend)
+
     def get_worker_init_fn(self) -> Callable | None:
         num_node = 1
         if os.environ.get("NODE_RANK", None) is not None:
@@ -45,7 +53,6 @@ class LhotseDataModule(pl.LightningDataModule):
 
         batch_sampler = sampler(cuts)
         worker_init_fn = self.get_worker_init_fn()
-        print(batch_sampler)
         dataloader = DataLoader(dataset(),
                                 batch_sampler=batch_sampler,
                                 num_workers=10,
@@ -69,8 +76,9 @@ class LhotseRecipesDataModule(LhotseDataModule):
                  test_manifest: str = None,
                  download: Callable = None,
                  prepare: Callable = None,
+                 audio_backend: AudioBackend = None,
                  ):
-        super().__init__(train_dataset, train_sampler, val_dataset, val_sampler, test_dataset, test_sampler)
+        super().__init__(train_dataset, train_sampler, val_dataset, val_sampler, test_dataset, test_sampler, audio_backend)
         self.download = download
         self.prepare = prepare
         self.train_manifest = train_manifest
@@ -83,6 +91,8 @@ class LhotseRecipesDataModule(LhotseDataModule):
 
     def train_dataloader(self):
         manifests = self.manifests
+        if self.train_manifest:
+            manifests = self.manifests[self.train_manifest]
         if 'cuts' in manifests:
             cuts = manifests['cuts']
         else:
@@ -103,15 +113,16 @@ class LhotseManifestDataModule(LhotseDataModule):
                  test_manifest_dir: Path = None,
                  test_dataset: Callable[[], Dataset] = None,
                  test_sampler: Callable[[Union[CutSet, Tuple[CutSet]]], CutSampler] = None,
+                 audio_backend: AudioBackend = None,
                  ):
-        super().__init__(train_dataset, train_sampler, val_dataset, val_sampler, test_dataset, test_sampler)
+        super().__init__(train_dataset, train_sampler, val_dataset, val_sampler, test_dataset, test_sampler, audio_backend)
         self.train_manifest_dir = train_manifest_dir
         self.val_manifest_dir = val_manifest_dir
         self.test_manifest_dir = test_manifest_dir
     
     def load_manifest(self, manifest_dir: Path) -> Dict:
-        recording_set = RecordingSet.from_jsonl_lazy(manifest_dir / "recordings.jsonl")
-        supervision_set = SupervisionSet.from_jsonl_lazy(manifest_dir / "supervisions.jsonl")
+        recording_set = RecordingSet.from_jsonl(manifest_dir / "recordings.jsonl")
+        supervision_set = SupervisionSet.from_jsonl(manifest_dir / "supervisions.jsonl")
         cut_set = CutSet.from_manifests(recordings=recording_set, supervisions=supervision_set)
         return {"recordings": recording_set, "supervisions": supervision_set, "cuts": cut_set}
     

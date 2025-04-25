@@ -103,3 +103,7 @@ class LlmTokenizerWrapper:
         target_ids = target_ids.type(torch.LongTensor)
         input_ids = input_ids.type(torch.LongTensor)
         return input_ids, attention_mask, target_ids, clean_texts
+
+
+def build_llm_tokenizer(llm_path: str, use_flash_attn: bool = False):
+    return LlmTokenizerWrapper.build_llm_tokenizer(llm_path, use_flash_attn)
