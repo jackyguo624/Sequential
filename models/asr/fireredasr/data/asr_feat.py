@@ -5,6 +5,7 @@ import kaldiio
 import kaldi_native_fbank as knf
 import numpy as np
 import torch
+from typing import Union
 
 
 class ASRFeatExtractor:
@@ -105,3 +106,41 @@ class KaldifeatFbank:
             return np.zeros((0, self.opts.mel_opts.num_bins))
         feat = np.vstack(feat)
         return feat
+
+from lhotse.features.base import FeatureExtractor, register_extractor
+from lhotse.features.kaldi.extractors import FbankConfig
+from typing import Optional
+
+@register_extractor
+class FiredasrFbank(FeatureExtractor):
+    name = "fireredasr-kaldi-fbank"
+    config_type = FbankConfig
+
+    def __init__(self, kaldi_cmvn_file, config: Optional[FbankConfig] = None):
+        super().__init__(config=config)
+        self.extractor = ASRFeatExtractor(kaldi_cmvn_file)
+        # Set the config to the default values from ASRFeatExtractor
+        self.config.frame_shift = 0.01
+        self.config.frame_length = 0.025
+        self.config.num_mel_bins = 80
+        self.config.dither = 0.0
+
+    def extract(self, samples: np.ndarray, sampling_rate: int) -> np.ndarray:
+        fbank = self.extractor.fbank((sampling_rate, samples))
+        if self.extractor.cmvn is not None:
+            fbank = self.extractor.cmvn(fbank)
+        return fbank
+
+    @property
+    def frame_shift(self) -> float:
+        return 0.01
+
+    @property
+    def feature_dim(self) -> int:
+        return 80
+
+    @property
+    def device(self) -> str:
+        return "cpu"
+
+

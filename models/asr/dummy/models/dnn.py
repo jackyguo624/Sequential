@@ -19,6 +19,8 @@ class Dnn(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         inputs = batch['inputs']
+        print(batch.keys())
+        breakpoint()
         print(inputs.device)
         outputs = self.forward(inputs)
         inputs = inputs.to(outputs.dtype)

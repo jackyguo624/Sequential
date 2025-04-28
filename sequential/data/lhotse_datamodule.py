@@ -55,8 +55,8 @@ class LhotseDataModule(pl.LightningDataModule):
         worker_init_fn = self.get_worker_init_fn()
         dataloader = DataLoader(dataset(),
                                 batch_sampler=batch_sampler,
-                                num_workers=10,
-                                persistent_workers=True,
+                                num_workers=0,
+                                #persistent_workers=True,
                                 worker_init_fn=worker_init_fn,
                                 collate_fn=lambda x: x)
 

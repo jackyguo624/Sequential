@@ -22,7 +22,7 @@ class KaldiAudioBackend(AudioBackend):
         force_opus_sampling_rate: Optional[int] = None,
     ) -> Tuple[np.ndarray, int]:
         sr, audio = kaldiio.load_mat(path_or_fd)
-        force_sampling_rate = self.force_sampling_rate | force_opus_sampling_rate
+        force_sampling_rate = self.force_sampling_rate or force_opus_sampling_rate
         if force_sampling_rate and sr != force_sampling_rate:
             # 计算新的样本数
             num_samples = int(len(audio) * force_sampling_rate / sr)

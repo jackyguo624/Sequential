@@ -15,7 +15,7 @@ dependencies = [
     "lightning>=2.5.1",
     "lightning-graphcore[lightning]>=0.1.0",
     "numpy==1.25.2",
-    "peft>=0.13.2",
+    "peft==0.10.0",
     "scipy>=1.15.2",
     "sentencepiece>=0.2.0",
     "torch>=2.0.0,<=2.1.0",

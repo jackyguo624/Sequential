@@ -1,15 +1,17 @@
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 
+from transformers import AutoTokenizer, AutoModelForCausalLM
+import torch
+
 def sanity_check_kwargs(kwargs):
     if 'torch_dtype' in kwargs:
         if kwargs['torch_dtype'] is not None:
-            # dymanic import torch_dtype, since kwargs not support torch_dtype in string format
-            # e.g. 'torch.float16' -> torch.float16
-            from importlib import importlib
-            torch_dtype = importlib.import_module(kwargs['torch_dtype'])
-            kwargs['torch_dtype'] = torch_dtype
-            print(f"torch_dtype: {kwargs['torch_dtype']}")
+            # Convert string representation to actual torch dtype
+            if isinstance(kwargs['torch_dtype'], str):
+                if kwargs['torch_dtype'].startswith('torch.'):
+                    dtype_name = kwargs['torch_dtype'].split('.')[-1]
+                    kwargs['torch_dtype'] = getattr(torch, dtype_name)
     return kwargs
 
 def auto_tokenizer_from_pretrained_wrapper(pretrained_model_name_or_path: str, *args, **kwargs):

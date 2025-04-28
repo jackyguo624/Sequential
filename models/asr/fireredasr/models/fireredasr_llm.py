@@ -1,13 +1,19 @@
 import logging
+from pathlib import Path
+from typing import Callable, Union
 
 import torch
 import pytorch_lightning as pl
-
-from typing import Callable, Any
 from models.asr.fireredasr.models.module.adapter import Adapter
 from models.asr.fireredasr.models.module.conformer_encoder import ConformerEncoder
-from models.asr.fireredasr.tokenizer.llm_tokenizer import DEFAULT_SPEECH_TOKEN, IGNORE_TOKEN_ID
-from models.asr.fireredasr.data.asr_feat import ASRFeatExtractor
+from models.asr.fireredasr.tokenizer.llm_tokenizer import (
+    LlmTokenizerWrapper,
+    DEFAULT_SPEECH_TOKEN,
+    IGNORE_TOKEN_ID
+)
+
+import logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class FireRedAsrLlm(pl.LightningModule):
     """
@@ -17,7 +23,6 @@ class FireRedAsrLlm(pl.LightningModule):
         llm: Any
         encoder_projector: Adapter
         tokenizer: AutoTokenizer
-        feat_extractor: ASRFeatExtractor
         freeze_encoder: bool
         freeze_llm: bool
         use_lora: bool
@@ -27,21 +32,29 @@ class FireRedAsrLlm(pl.LightningModule):
                  llm: Callable,
                  encoder_projector: Adapter, #  Callable[[int], Adapter],
                  tokenizer: Callable,
-                 feat_extractor: ASRFeatExtractor,
                  freeze_encoder: bool,
                  freeze_llm: bool,
                  use_lora: bool,
+                 max_len: int = 4096,
+                 model_path: Union[str, Path] = None,
                  ):
         super().__init__()
         self.encoder = encoder
         self.llm = llm
         self.encoder_projector = encoder_projector # (llm.config.hidden_size)
         self.tokenizer = tokenizer
-        self.feat_extractor = feat_extractor
+
         # args
         self.freeze_encoder = freeze_encoder
         self.freeze_llm = freeze_llm
         self.use_lora = use_lora
+        self.max_len = max_len
+        self.model_path = model_path
+
+        if self.freeze_encoder:
+            for name, param in self.encoder.named_parameters():
+                param.requires_grad = False
+            self.encoder.eval()
 
         # LLM Freeze or LoRA
         if self.freeze_llm:
@@ -70,6 +83,11 @@ class FireRedAsrLlm(pl.LightningModule):
                 self.llm = get_peft_model(self.llm, lora_config)
                 self.llm.print_trainable_parameters()
 
+        if self.model_path:
+            logging.info(f"Loading model from {self.model_path}")
+            package = torch.load(self.model_path, map_location=lambda storage, loc: storage)
+            self.load_state_dict(package["model_state_dict"], strict=False)
+
         # Tokenizer
         assert self.tokenizer.pad_token_id == self.tokenizer.convert_tokens_to_ids("<|endoftext|>")
         self.llm.config.pad_token_id = self.tokenizer.pad_token_id
@@ -78,20 +96,102 @@ class FireRedAsrLlm(pl.LightningModule):
         self.llm.config.default_speech_token_id = self.tokenizer.convert_tokens_to_ids(
             DEFAULT_SPEECH_TOKEN
         )
+
+
         self.save_hyperparameters()
 
-    def forward(self,
-                padded_feat: torch.Tensor,
-                feat_lengths: torch.Tensor,
-                padded_input_ids: torch.Tensor,
-                attention_mask: torch.Tensor):
-        return self.transcribe(padded_feat, feat_lengths, padded_input_ids, attention_mask)
+    def forward(self, batch, batch_idx):
+
+        import numpy as np
+
+        device = next(self.encoder.parameters()).device
+        dtype = next(self.encoder.parameters()).dtype
+
+        pad_feats, supervisions = batch['inputs'], batch['supervisions']
+
+        feat_lengths = supervisions['num_frames']
+        pad_feats = pad_feats.to(device).to(dtype)
+
+        encoder_outs, enc_lengths, enc_mask = self.encoder(pad_feats, feat_lengths)
+
+        speech_features, speech_lens = self.encoder_projector(encoder_outs, enc_lengths)
+
+        '''
+        # Tokenizer processing
+        padded_input_ids, attention_mask, _, _ = LlmTokenizerWrapper.preprocess_texts(
+            [""] * len(supervisions['text']),
+            self.tokenizer,
+            self.max_len,
+            decode=True
+            )
+        padded_input_ids = padded_input_ids.to(device)
+        attention_mask = attention_mask.to(device)
+
+
+        generated_ids = self.transcribe(
+                pad_feats, feat_lengths, padded_input_ids, attention_mask,
+                1,
+                0,
+                0,
+                1.0,
+                0.0,
+                1.0
+            )
+        decoded_texts = self.tokenizer.batch_decode(generated_ids,
+                                                skip_special_tokens=True)
+        print(f"decoded texts: {decoded_texts}")
+        breakpoint()
+        '''
+
+        text = supervisions['text']
+        padded_input_ids, attention_mask, target_ids, _ = LlmTokenizerWrapper.preprocess_texts(text,
+            self.tokenizer,
+            self.max_len,
+            decode=False
+            )
+
+        padded_input_ids = padded_input_ids.to(device)
+        attention_mask = attention_mask.to(device)
+
+        target_ids = target_ids.to(device)
+        inputs_embeds = self.llm.get_input_embeddings()(padded_input_ids)
+
+        # Merge speech features and text
+        inputs_embeds, attention_mask, labels = \
+            self._merge_input_ids_with_speech_features(
+                speech_features.to(inputs_embeds.dtype),
+                inputs_embeds,
+                padded_input_ids,
+                attention_mask,
+                labels=target_ids,
+                speech_lens=speech_lens
+            )
+        # LLM forward
+        outputs = self.llm(
+            inputs_embeds=inputs_embeds,
+            attention_mask=attention_mask,
+            labels=labels,
+        )
+
+        # Loss and accuracy
+        loss = outputs.loss
+        acc = torch.tensor(0.0, device=self.device)
+
+        with torch.no_grad():
+            mask = labels != IGNORE_TOKEN_ID
+            preds = torch.argmax(outputs.logits, -1)
+            acc = torch.sum(preds[mask] == labels[mask]) / len(labels[mask])
+
+        print(f"loss: {loss} acc: {acc}")
+
+        return loss, acc
 
     def training_step(self, batch, batch_idx):
-        print(batch['inputs'].size(), batch['inputs'].device)
-        self.log("train_loss", 1.0)
-        return 1.0
-    
+        loss, acc = self.forward(batch, batch_idx)
+        self.log("train_loss", loss)
+        self.log("train_acc", acc)
+        return loss
+
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=1e-4)
         return optimizer
@@ -107,6 +207,7 @@ class FireRedAsrLlm(pl.LightningModule):
                   repetition_penalty: float = 1.0,
                   llm_length_penalty: float = 1.0,
                   temperature: float = 1.0):
+
         encoder_outs, enc_lengths, enc_mask = self.encoder(padded_feat, feat_lengths)
         speech_features, speech_lens = self.encoder_projector(encoder_outs, enc_lengths)
         inputs_embeds = self.llm.get_input_embeddings()(padded_input_ids)
