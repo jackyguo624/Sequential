@@ -45,7 +45,7 @@ def fix_duplicate_ids(lines: List[str], verbose: bool=False) -> Dict[str, List[s
     return lines
 
 
-def process_aisv1_jsonl(line: str, 
+def process_aisv1_jsonl(line: str,
                         num_channels: int=1,
                         force_sampling_rate: Optional[int]=None) -> Tuple[Recording, SupervisionSegment]:
 
@@ -87,11 +87,11 @@ def process_aisv1_jsonl(line: str,
     )
     return recording, supervision
 
-def convert_to_manifest(jsonl_path: Union[Path, str], 
-                        output_dir: Union[Path, str], 
-                        format: str, 
-                        num_channels: int=1, 
-                        num_workers: int=1, 
+def convert_to_manifest(jsonl_path: Union[Path, str],
+                        output_dir: Union[Path, str],
+                        format: str,
+                        num_channels: int=1,
+                        num_workers: int=1,
                         force_sampling_rate: Optional[int]=None):
     with open(jsonl_path, 'r') as f:
         lines = f.readlines()
