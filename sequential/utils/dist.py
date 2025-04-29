@@ -9,8 +9,7 @@ logger = logging.getLogger(__name__)
 def get_rank_and_world_size():
     usage = '''
     Usage:
-        rank, world_size = get_rank_and_world_size()
-        Get rank and world size from environment variables in Three modes:
+        Get rank and world_size from environment variables in three modes:
             1. Single XPU mode
                 `WORLD_SIZE` is not set in environment variables
             2. Multi XPU mode with RANK in environment variables
