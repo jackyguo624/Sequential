@@ -39,6 +39,9 @@ class FireRedAsrLlm(pl.LightningModule):
                  model_path: Union[str, Path] = None,
                  ):
         super().__init__()
+
+        self.automatic_optimization = False
+
         self.encoder = encoder
         self.llm = llm
         self.encoder_projector = encoder_projector # (llm.config.hidden_size)
@@ -102,15 +105,12 @@ class FireRedAsrLlm(pl.LightningModule):
 
     def forward(self, batch, batch_idx):
 
-        import numpy as np
-
         device = next(self.encoder.parameters()).device
         dtype = next(self.encoder.parameters()).dtype
 
-        pad_feats, supervisions = batch['inputs'], batch['supervisions']
+        pad_feats, supervisions = batch['inputs'].to(dtype), batch['supervisions']
 
-        feat_lengths = supervisions['num_frames']
-        pad_feats = pad_feats.to(device).to(dtype)
+        feat_lengths = supervisions['num_frames'].long()
 
         encoder_outs, enc_lengths, enc_mask = self.encoder(pad_feats, feat_lengths)
 
@@ -152,8 +152,8 @@ class FireRedAsrLlm(pl.LightningModule):
 
         padded_input_ids = padded_input_ids.to(device)
         attention_mask = attention_mask.to(device)
-
         target_ids = target_ids.to(device)
+
         inputs_embeds = self.llm.get_input_embeddings()(padded_input_ids)
 
         # Merge speech features and text
@@ -175,7 +175,7 @@ class FireRedAsrLlm(pl.LightningModule):
 
         # Loss and accuracy
         loss = outputs.loss
-        acc = torch.tensor(0.0, device=self.device)
+        acc = -1
 
         with torch.no_grad():
             mask = labels != IGNORE_TOKEN_ID
@@ -188,9 +188,20 @@ class FireRedAsrLlm(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         loss, acc = self.forward(batch, batch_idx)
-        self.log("train_loss", loss)
-        self.log("train_acc", acc)
+
+        if "DeepSpeed" in self._trainer.strategy.__class__.__name__:
+            self._trainer.strategy.model.backward(loss)
+            self._trainer.strategy.model.step()
+        else:
+            opt = self.optimizers()
+            opt.zero_grad()
+            self.manual_backward(loss)
+            opt.step()
+
+        self.log('train_loss', loss)
+        self.log('train_acc', acc)
         return loss
+
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=1e-4)

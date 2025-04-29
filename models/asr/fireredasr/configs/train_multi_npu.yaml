@@ -43,7 +43,7 @@ model:
 data:
   class_path: sequential.data.lhotse_datamodule.LhotseManifestDataModule
   init_args:
-    train_manifest_dir: export/aispeech/asr/collectionzh+en+fangyan-2w-asr/train1000
+    train_manifest_dir: export/aispeech/asr/collectionzh+en+fangyan-2w-asr/dev
     train_dataset:
       class_path: sequential.data.dataset.K2SpeechRecognitionDatasetWraper
       init_args:
@@ -59,7 +59,7 @@ data:
     train_sampler:
       class_path: lhotse.dataset.sampling.SimpleCutSampler
       init_args:
-        max_duration: 20
+        max_duration: 10
         shuffle: True
     audio_backend:
       class_path: sequential.data.audio_backend.KaldiAudioBackend
@@ -73,8 +73,8 @@ trainer:
   logger: true
   accelerator:
     class_path: lightning_npu.accelerators.npu.NPUAccelerator
-  devices: 1
+  devices: 2
   strategy:
-    class_path: lightning_npu.strategies.npu.SingleNPUStrategy
+    class_path: lightning_npu.strategies.npu_parallel.NPUParallelStrategy
   use_distributed_sampler: false
 

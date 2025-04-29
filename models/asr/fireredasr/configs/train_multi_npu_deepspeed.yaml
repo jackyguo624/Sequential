@@ -21,7 +21,7 @@ model:
         pretrained_model_name_or_path: models/asr/fireredasr/pretrained_model/FireRedASR/FireRedASR-LLM-L/Qwen2-7B-Instruct
       dict_kwargs:
         attn_implementation: eager # flash_attention_2
-        torch_dtype: torch.float16
+        torch_dtype: torch.float32
 
     tokenizer:
       class_path: models.asr.fireredasr.tokenizer.llm_tokenizer.build_llm_tokenizer
@@ -43,7 +43,7 @@ model:
 data:
   class_path: sequential.data.lhotse_datamodule.LhotseManifestDataModule
   init_args:
-    train_manifest_dir: export/aispeech/asr/collectionzh+en+fangyan-2w-asr/train1000
+    train_manifest_dir: export/aispeech/asr/collectionzh+en+fangyan-2w-asr/dev
     train_dataset:
       class_path: sequential.data.dataset.K2SpeechRecognitionDatasetWraper
       init_args:
@@ -59,7 +59,7 @@ data:
     train_sampler:
       class_path: lhotse.dataset.sampling.SimpleCutSampler
       init_args:
-        max_duration: 20
+        max_duration: 50
         shuffle: True
     audio_backend:
       class_path: sequential.data.audio_backend.KaldiAudioBackend
@@ -71,10 +71,13 @@ trainer:
   default_root_dir: fireredasr_npu
   max_epochs: 1
   logger: true
-  accelerator:
+  accelerator: 
     class_path: lightning_npu.accelerators.npu.NPUAccelerator
   devices: 1
-  strategy:
-    class_path: lightning_npu.strategies.npu.SingleNPUStrategy
+  num_nodes: 1
+  strategy: 
+    class_path: lightning_npu.strategies.npu_deepspeed.NPUDeepSpeedStrategy
+    init_args:
+      config: models/asr/dummy/configs/ds_config.json
   use_distributed_sampler: false
 

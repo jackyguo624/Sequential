@@ -7,7 +7,7 @@ model:
     hidden_dim: 100
     output_dim: 40
 data:
-  class_path: sequential.data.lhotse_recipes_datamodule.LhotseRecipesDataModule
+  class_path: sequential.data.lhotse_datamodule.LhotseRecipesDataModule
   init_args:
     download:
       class_path: lhotse.recipes.librispeech.download_librispeech

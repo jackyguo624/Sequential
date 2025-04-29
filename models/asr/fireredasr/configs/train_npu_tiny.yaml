@@ -10,7 +10,7 @@ model:
 data:
   class_path: sequential.data.lhotse_datamodule.LhotseManifestDataModule
   init_args:
-    train_manifest_dir: 
+    train_manifest_dir: export/aispeech/asr/collectionzh+en+fangyan-2w-asr/dev
     train_dataset:
       class_path: sequential.data.dataset.K2SpeechRecognitionDatasetWraper
       init_args:

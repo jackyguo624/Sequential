@@ -7,11 +7,10 @@ from lhotse.dataset.dataloading import make_worker_init_fn
 from torch.utils.data import DataLoader, Dataset
 from pathlib import Path
 from typing import Tuple, Union
-import os
 from lhotse.audio.backend import AudioBackend, set_current_audio_backend
-
 import logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+from sequential.utils.dist import get_rank_and_world_size
+
 
 class LhotseDataModule(pl.LightningDataModule):
     def __init__(self,
@@ -22,6 +21,7 @@ class LhotseDataModule(pl.LightningDataModule):
                  test_dataset: Callable[[], Dataset] = None,
                  test_sampler: Callable[[Union[CutSet, Tuple[CutSet]]], CutSampler] = None,
                  audio_backend: AudioBackend = None,
+                 num_workers: int = 10,
                  ):
         super().__init__()
         self.train_dataset = train_dataset
@@ -31,32 +31,28 @@ class LhotseDataModule(pl.LightningDataModule):
         self.test_dataset = test_dataset
         self.test_sampler = test_sampler
         self.audio_backend = audio_backend
+        self.num_workers = num_workers
+
         if self.audio_backend:
             logging.info(f"Setting audio backend to {self.audio_backend}")
             set_current_audio_backend(self.audio_backend)
 
-    def get_worker_init_fn(self) -> Callable | None:
-        num_node = 1
-        if os.environ.get("NODE_RANK", None) is not None:
-            rank = int(os.environ.get("NODE_RANK", None)) * num_node + \
-                int(os.environ.get("LOCAL_RANK", None))
-            world_size = int(os.environ.get("WORLD_SIZE", None))
-            worker_init_fn = make_worker_init_fn(rank=rank, world_size=world_size)
-            print(f'rank: {rank}, world: {world_size} ')
-        else:
-            worker_init_fn = None
-        return worker_init_fn
 
     def get_dataloader(self, dataset: Callable[[], Dataset],
                        sampler: Callable[[Union[CutSet, Tuple[CutSet]]], CutSampler],
                        cuts: CutSet):
+        rank, world_size = get_rank_and_world_size()
+
+        if rank == None:
+            worker_init_fn = None
+        else:
+            worker_init_fn = make_worker_init_fn(rank=rank, world_size=world_size)
 
         batch_sampler = sampler(cuts)
-        worker_init_fn = self.get_worker_init_fn()
         dataloader = DataLoader(dataset(),
                                 batch_sampler=batch_sampler,
-                                num_workers=0,
-                                #persistent_workers=True,
+                                num_workers=self.num_workers,
+                                persistent_workers=True,
                                 worker_init_fn=worker_init_fn,
                                 collate_fn=lambda x: x)
 
@@ -96,7 +92,7 @@ class LhotseRecipesDataModule(LhotseDataModule):
         if 'cuts' in manifests:
             cuts = manifests['cuts']
         else:
-            cuts = CutSet.from_manifests(recordings=manifests['recordings'], 
+            cuts = CutSet.from_manifests(recordings=manifests['recordings'],
                                          supervisions=manifests['supervisions'])
         return self.get_dataloader(self.train_dataset, self.train_sampler, cuts)
 
@@ -119,13 +115,13 @@ class LhotseManifestDataModule(LhotseDataModule):
         self.train_manifest_dir = train_manifest_dir
         self.val_manifest_dir = val_manifest_dir
         self.test_manifest_dir = test_manifest_dir
-    
+
     def load_manifest(self, manifest_dir: Path) -> Dict:
         recording_set = RecordingSet.from_jsonl(manifest_dir / "recordings.jsonl")
         supervision_set = SupervisionSet.from_jsonl(manifest_dir / "supervisions.jsonl")
         cut_set = CutSet.from_manifests(recordings=recording_set, supervisions=supervision_set)
         return {"recordings": recording_set, "supervisions": supervision_set, "cuts": cut_set}
-    
+
     def setup(self, stage: Optional[str] = None):
         if self.train_manifest_dir and stage == "fit":
             self.train_manifest = self.load_manifest(self.train_manifest_dir)
@@ -133,12 +129,12 @@ class LhotseManifestDataModule(LhotseDataModule):
             self.val_manifest = self.load_manifest(self.val_manifest_dir)
         if self.test_manifest_dir and stage == "test":
             self.test_manifest = self.load_manifest(self.test_manifest_dir)
-    
+
     def train_dataloader(self):
-        if self.train_manifest: 
+        if self.train_manifest:
             cuts = self.train_manifest['cuts']
         else:
-            cuts = CutSet.from_manifests(recordings=self.train_manifest['recordings'], 
+            cuts = CutSet.from_manifests(recordings=self.train_manifest['recordings'],
                                          supervisions=self.train_manifest['supervisions'])
         return self.get_dataloader(self.train_dataset, self.train_sampler, cuts)
-    
+

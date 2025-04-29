@@ -1,41 +1,38 @@
 # pytorch_lightning==2.5.1
 seed_everything: true
 model:
-  class_path: models.asr.dummy.models.dnn.Dnn
+  class_path: models.asr.dummy.models.dnn_manual.Dnn
   init_args:
-    input_dim: 40
+    input_dim: 80
     hidden_dim: 100
-    output_dim: 40
-data:
-  class_path: sequential.data.lhotse_datamodule.LhotseRecipesDataModule
-  init_args:
-    download:
-      class_path: lhotse.recipes.librispeech.download_librispeech
-      init_args:
-        dataset_parts: mini_librispeech
-        target_dir: export/data/mini_librispeech
-    prepare:
-      class_path: lhotse.recipes.librispeech.prepare_librispeech
-      init_args:
-        corpus_dir: export/data/mini_librispeech/LibriSpeech
+    output_dim: 80
 
-    train_manifest: train-clean-5
+data:
+  class_path: sequential.data.lhotse_datamodule.LhotseManifestDataModule
+  init_args:
+    train_manifest_dir: export/aispeech/asr/collectionzh+en+fangyan-2w-asr/dev
     train_dataset:
       class_path: sequential.data.dataset.K2SpeechRecognitionDatasetWraper
-      init_args: 
+      init_args:
         input_strategy:
           class_path: lhotse.dataset.input_strategies.OnTheFlyFeatures
           init_args:
             extractor:
-              class_path: lhotse.features.kaldi.extractors.Fbank
+              class_path: models.asr.fireredasr.data.asr_feat.FiredasrFbank
               init_args:
-                config:
-                  num_mel_bins: 40
+                kaldi_cmvn_file: models/asr/fireredasr/pretrained_model/FireRedASR/FireRedASR-LLM-L/cmvn.ark
+
+
     train_sampler:
       class_path: lhotse.dataset.sampling.SimpleCutSampler
       init_args:
-        max_duration: 200
+        max_duration: 50
         shuffle: True
+    audio_backend:
+      class_path: sequential.data.audio_backend.KaldiAudioBackend
+      init_args:
+        force_sampling_rate: 16000
+
 
 
 trainer:
