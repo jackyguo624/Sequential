@@ -96,6 +96,16 @@ class LhotseRecipesDataModule(LhotseDataModule):
                                          supervisions=manifests['supervisions'])
         return self.get_dataloader(self.train_dataset, self.train_sampler, cuts)
 
+    def val_dataloader(self):
+        manifests = self.manifests
+        if self.val_manifest:
+            manifests = self.manifests[self.val_manifest]
+        if 'cuts' in manifests:
+            cuts = manifests['cuts']
+        else:
+            cuts = CutSet.from_manifests(recordings=manifests['recordings'],
+                                         supervisions=manifests['supervisions'])
+        return self.get_dataloader(self.val_dataset, self.val_sampler, cuts)
 
 
 class LhotseManifestDataModule(LhotseDataModule):
@@ -123,6 +133,10 @@ class LhotseManifestDataModule(LhotseDataModule):
         return {"recordings": recording_set, "supervisions": supervision_set, "cuts": cut_set}
 
     def setup(self, stage: Optional[str] = None):
+        self.train_manifest = None
+        self.val_manifest = None
+        self.test_manifest = None
+
         if self.train_manifest_dir and stage == "fit":
             self.train_manifest = self.load_manifest(self.train_manifest_dir)
         if self.val_manifest_dir and stage == "fit":
@@ -131,10 +145,23 @@ class LhotseManifestDataModule(LhotseDataModule):
             self.test_manifest = self.load_manifest(self.test_manifest_dir)
 
     def train_dataloader(self):
-        if self.train_manifest:
+        if not self.train_manifest:
+            return None
+
+        if 'cuts' in self.train_manifest:
             cuts = self.train_manifest['cuts']
         else:
             cuts = CutSet.from_manifests(recordings=self.train_manifest['recordings'],
                                          supervisions=self.train_manifest['supervisions'])
         return self.get_dataloader(self.train_dataset, self.train_sampler, cuts)
 
+    def val_dataloader(self):
+        if not self.val_manifest:
+            return None
+
+        if 'cuts' in self.val_manifest:
+            cuts = self.val_manifest['cuts']
+        else:
+            cuts = CutSet.from_manifests(recordings=self.val_manifest['recordings'],
+                                         supervisions=self.val_manifest['supervisions'])
+        return self.get_dataloader(self.val_dataset, self.val_sampler, cuts)

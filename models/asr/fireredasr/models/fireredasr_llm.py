@@ -103,7 +103,7 @@ class FireRedAsrLlm(pl.LightningModule):
 
         self.save_hyperparameters()
 
-    def forward(self, batch, batch_idx):
+    def forward(self, batch):
 
         device = next(self.encoder.parameters()).device
         dtype = next(self.encoder.parameters()).dtype
@@ -116,7 +116,6 @@ class FireRedAsrLlm(pl.LightningModule):
 
         speech_features, speech_lens = self.encoder_projector(encoder_outs, enc_lengths)
 
-        '''
         # Tokenizer processing
         padded_input_ids, attention_mask, _, _ = LlmTokenizerWrapper.preprocess_texts(
             [""] * len(supervisions['text']),
@@ -139,9 +138,7 @@ class FireRedAsrLlm(pl.LightningModule):
             )
         decoded_texts = self.tokenizer.batch_decode(generated_ids,
                                                 skip_special_tokens=True)
-        print(f"decoded texts: {decoded_texts}")
-        breakpoint()
-        '''
+        print(f"decoded texts: {decoded_texts} text: {supervisions['text']}")
 
         text = supervisions['text']
         padded_input_ids, attention_mask, target_ids, _ = LlmTokenizerWrapper.preprocess_texts(text,
@@ -187,21 +184,31 @@ class FireRedAsrLlm(pl.LightningModule):
         return loss, acc
 
     def training_step(self, batch, batch_idx):
-        loss, acc = self.forward(batch, batch_idx)
 
         if "DeepSpeed" in self._trainer.strategy.__class__.__name__:
+            loss, acc = self._trainer.strategy.model(batch)
+            self._trainer.fit_loop.epoch_loop.manual_optimization.optim_step_progress.total.completed += 1
             self._trainer.strategy.model.backward(loss)
             self._trainer.strategy.model.step()
         else:
+            loss, acc = self.forward(batch)
             opt = self.optimizers()
             opt.zero_grad()
             self.manual_backward(loss)
             opt.step()
 
-        self.log('train_loss', loss)
-        self.log('train_acc', acc)
+        self.log('train_loss', loss, on_epoch=True, batch_size=batch['inputs'].shape[0])
+        self.log('train_acc', acc, on_epoch=True, batch_size=batch['inputs'].shape[0])
         return loss
 
+    def validation_step(self, batch, batch_idx):
+        if "DeepSpeed" in self._trainer.strategy.__class__.__name__:
+            loss, acc = self._trainer.strategy.model(batch)
+        else:
+            loss, acc = self.forward(batch)
+        self.log('val_loss', loss, on_epoch=True, batch_size=batch['inputs'].shape[0])
+        self.log('val_acc', acc, on_epoch=True, batch_size=batch['inputs'].shape[0])
+        return loss
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=1e-4)
